@@ -458,7 +458,7 @@ git-fork() {
   local base
   base=$(basename "$main_root")
   local seed
-  seed=$(LC_ALL=C tr -dc 'a-zA-Z' < /dev/urandom | head -c 6; echo)
+  seed=$(LC_ALL=C head -c 128 /dev/urandom | LC_ALL=C tr -dc 'a-zA-Z' | head -c 6)
   local dir="${GIT_WORKTREE_BASE:-$HOME/.worktrees}/$base/$seed"
   mkdir -p "$dir"
 

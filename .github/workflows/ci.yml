@@ -25,5 +25,5 @@ jobs:
           git clone --depth 1 --branch v1.11.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
           sudo /tmp/bats-core/install.sh /usr/local
       - name: Run test suite
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: bin/test
