@@ -75,11 +75,15 @@ Delete/merge flags (`-d`, `-D`, `--delete-and-skip-checks`, `-m`) are mutually e
 
 ## Notes
 
-**macOS only.** The timestamp formatting in `git-fork-show-worktrees` uses `stat -f "%Sm"` (BSD syntax). It will not work on Linux without modification.
+**macOS and Linux.** The timestamp formatting in `git-fork-show-worktrees` uses `__git_fork_mtime`, which tries BSD `stat -f "%Sm"` first (macOS) then falls back to GNU `stat -c "%y"` (Linux). If both fail it prints `unknown`.
 
 **Alias override.** Sourcing this file sets `alias git="__git__"`. This overrides any pre-existing `git` alias (e.g. from `hub` or `gh`). If you rely on another git wrapper, source this file first and alias-chain as needed.
 
 **`git unfork` is gone.** The `git-unfork` command has been removed; its functionality is now under `git fork -d`, `-D`, `--delete-and-skip-checks`, and `-m`. Running `git unfork` falls through to real git, which prints an "unknown command" error.
+
+## License
+
+Apache-2.0
 
 ## Running tests
 

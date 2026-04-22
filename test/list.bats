@@ -31,7 +31,7 @@ load 'helpers'
 
 @test "all mode with only default base scans that base" {
   make_repo myrepo
-  local default_base="$HOME/Development/.worktrees"
+  local default_base="$HOME/.worktrees"
   mkdir -p "$default_base/myrepo"
   command git -C "$REAL_TMPDIR/src/myrepo" worktree add -q --detach \
     "$default_base/myrepo/seedX"
@@ -46,7 +46,7 @@ load 'helpers'
 @test "all mode dual-scan dedups same repo appearing under both bases" {
   make_repo myrepo
   make_fork myrepo seedA
-  local default_base="$HOME/Development/.worktrees"
+  local default_base="$HOME/.worktrees"
   mkdir -p "$default_base/myrepo"
   command git -C "$REAL_TMPDIR/src/myrepo" worktree add -q --detach \
     "$default_base/myrepo/seedB"

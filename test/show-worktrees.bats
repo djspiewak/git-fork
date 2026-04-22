@@ -99,6 +99,45 @@ EOF
   [[ "$line1" == *"ab        "* ]]
 }
 
+# --- __git_fork_mtime unit tests ---
+
+@test "__git_fork_mtime: system stat returns well-formed timestamp" {
+  local tmp_file="$REAL_TMPDIR/mtime_test_file"
+  touch "$tmp_file"
+  local result
+  result=$(__git_fork_mtime "$tmp_file")
+  [[ "$result" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}$ ]]
+}
+
+@test "__git_fork_mtime: GNU branch returns well-formed timestamp when BSD stat fails" {
+  local tmp_file="$REAL_TMPDIR/mtime_gnu_test_file"
+  touch "$tmp_file"
+  # Shadow stat so -f form fails (GNU has no -f) but -c form succeeds.
+  stat() {
+    for a in "$@"; do [[ "$a" == "-f" ]] && return 1; done
+    echo "2024-03-15 10:30:45.123456789 +0000"
+  }
+  export -f stat
+  local result
+  result=$(__git_fork_mtime "$tmp_file")
+  unset -f stat
+  [[ "$result" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}$ ]]
+}
+
+@test "__git_fork_mtime: returns 'unknown' and no stderr when both stat forms fail" {
+  local tmp_file="$REAL_TMPDIR/mtime_fail_test_file"
+  touch "$tmp_file"
+  # Shadow stat to always fail.
+  stat() { return 1; }
+  export -f stat
+  local result stderr_output
+  result=$(__git_fork_mtime "$tmp_file" 2>"$REAL_TMPDIR/mtime_stderr_$$")
+  stderr_output=$(cat "$REAL_TMPDIR/mtime_stderr_$$"; rm -f "$REAL_TMPDIR/mtime_stderr_$$")
+  unset -f stat
+  [[ "$result" == "unknown" ]]
+  [[ -z "$stderr_output" ]]
+}
+
 @test "mixed ok and broken entries both rendered" {
   local repo_dir="$REAL_TMPDIR/worktrees/myrepo"
   local ok_dir="$repo_dir/goodseed"

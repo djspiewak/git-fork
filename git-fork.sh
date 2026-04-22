@@ -1,3 +1,13 @@
+__git_fork_mtime() {
+  local ts
+  if stat --version > /dev/null 2>&1; then
+    ts=$(LC_ALL=C stat -c "%y" "$1" 2>/dev/null | cut -c1-16)
+  else
+    ts=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$1" 2>/dev/null)
+  fi
+  echo "${ts:-unknown}"
+}
+
 # Read `git worktree list --porcelain` from stdin; print entries under repo_dir.
 # Buffers all rows before printing so column widths can be computed dynamically.
 git-fork-show-worktrees() {
@@ -20,7 +30,7 @@ git-fork-show-worktrees() {
             wt_slugs+=("") wt_times+=("") wt_ok+=(0)
           else
             local ts slug
-            ts=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$cur_path" 2>/dev/null || echo "unknown")
+            ts=$(__git_fork_mtime "$cur_path")
             [[ -n "$cur_branch" ]] && slug="$cur_branch" || slug="(${cur_sha:0:7}...)"
             wt_slugs+=("$slug") wt_times+=("$ts") wt_ok+=(1)
             [[ ${#slug} -gt $max_slug ]] && max_slug=${#slug}
@@ -52,7 +62,7 @@ git-fork-show-worktrees() {
 
 git-fork-list() {
   local list_all="${1:-0}"
-  local base_dir="${GIT_WORKTREE_BASE:-$HOME/Development/.worktrees}"
+  local base_dir="${GIT_WORKTREE_BASE:-$HOME/.worktrees}"
 
   if [[ ! -d "$base_dir" ]]; then
     echo "git fork: worktrees base directory not found: $base_dir" >&2
@@ -84,7 +94,7 @@ git-fork-list() {
     # -not -empty skips them without descending into each one.
     local -a scan_dirs
     scan_dirs=("$base_dir")
-    local default_base="$HOME/Development/.worktrees"
+    local default_base="$HOME/.worktrees"
     if [[ "$base_dir" != "$default_base" && -d "$default_base" ]]; then
       scan_dirs+=("$default_base")
     fi
@@ -217,7 +227,7 @@ git-fork() {
         echo '       git fork --delete-and-skip-checks'
         echo '       git fork -m|--merge [merge-args…]'
         echo
-        echo "Creates a new detached worktree under ${GIT_WORKTREE_BASE:-$HOME/Development/.worktrees}, pointing to commitish or HEAD if unspecified"
+        echo "Creates a new detached worktree under ${GIT_WORKTREE_BASE:-$HOME/.worktrees}, pointing to commitish or HEAD if unspecified"
         echo
         echo 'Options:'
         echo '  --list, -l              List worktrees for the current repository'
@@ -353,7 +363,7 @@ git-fork() {
   fi
 
   if [[ -n "$jump_seed" ]]; then
-    local base_dir="${GIT_WORKTREE_BASE:-$HOME/Development/.worktrees}"
+    local base_dir="${GIT_WORKTREE_BASE:-$HOME/.worktrees}"
     local jump_dir=""
 
     local git_common_dir
@@ -411,7 +421,7 @@ git-fork() {
 
   local base="$(basename "$PWD")"
   local seed=$(LC_ALL=C tr -dc 'a-zA-Z' < /dev/urandom | head -c 6; echo)
-  local dir="${GIT_WORKTREE_BASE:-$HOME/Development/.worktrees}/$base/$seed"
+  local dir="${GIT_WORKTREE_BASE:-$HOME/.worktrees}/$base/$seed"
   mkdir -p "$dir"
 
   command git worktree add --detach "$dir" "$sha"

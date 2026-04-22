@@ -5,7 +5,7 @@ setup() {
   export REAL_TMPDIR
   export GIT_WORKTREE_BASE="$REAL_TMPDIR/.worktrees"
   export HOME="$REAL_TMPDIR/home"
-  mkdir -p "$GIT_WORKTREE_BASE" "$HOME/Development/.worktrees"
+  mkdir -p "$GIT_WORKTREE_BASE" "$HOME/.worktrees"
   # shellcheck disable=SC1090
   source "$BATS_TEST_DIRNAME/../git-fork.sh"
 }
