@@ -24,12 +24,12 @@ load 'helpers'
   [[ "$output" == *"seedA"* ]]
 }
 
-@test "git unfork routes to git-unfork (not-in-worktree path)" {
+@test "git unfork falls through to real git and exits non-zero with 'unfork' in output" {
   make_repo myrepo
   cd "$REAL_TMPDIR/src/myrepo"
   run __git__ unfork
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Not in worktree"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unfork"* ]]
 }
 
 @test "git status falls through to real git" {

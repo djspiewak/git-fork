@@ -134,32 +134,223 @@ git-fork-list() {
   fi
 }
 
+# Expand a short-flag cluster token like -la into -l -a (one flag per line).
+# Value-taking flags (-j) must be last in a cluster; otherwise returns 1.
+_git_fork_parse_cluster() {
+  local token="$1"
+  local stripped="${token#-}"
+  if [[ ! "$stripped" =~ ^[a-zA-Z]+$ ]]; then
+    echo "git fork: invalid cluster '$token': only letters allowed in short-flag clusters" >&2
+    return 1
+  fi
+  local i=0 len=${#stripped} ch
+  local -a out=()
+  while (( i < len )); do
+    ch="${stripped:i:1}"
+    case "$ch" in
+      j)
+        if (( i != len - 1 )); then
+          echo "git fork: flag -$ch takes a value and must be last in a cluster: $token" >&2
+          return 1
+        fi
+        ;;
+    esac
+    out+=("-$ch")
+    (( i++ )) || true
+  done
+  printf '%s\n' "${out[@]}"
+}
+
+# Echoes the worktree root if inside a linked worktree (.git is a file), or returns 1.
+_git_fork_worktree_root() {
+  local root
+  root=$(command git rev-parse --show-toplevel 2>/dev/null) || return 1
+  [[ -f "$root/.git" ]] || return 1
+  echo "$root"
+}
+
+# Echoes the canonical main repo root, or returns 1.
+_git_fork_main_repo_root() {
+  local common_dir
+  common_dir=$(command git rev-parse --git-common-dir 2>/dev/null) || return 1
+  (cd "${common_dir}/.." && pwd -P) 2>/dev/null
+}
+
+# Returns 0 if the given directory has uncommitted or untracked changes.
+_git_fork_is_dirty() {
+  local dir="$1"
+  local status_out
+  status_out=$(command git -C "$dir" status --porcelain 2>/dev/null)
+  [[ -n "$status_out" ]]
+}
+
+# Returns 0 if fork_sha is an ancestor of HEAD in main_repo_root.
+_git_fork_is_merged() {
+  local fork_sha="$1"
+  local main_repo_root="$2"
+  command git -C "$main_repo_root" merge-base --is-ancestor "$fork_sha" HEAD 2>/dev/null
+}
+
 git-fork() {
   local list=0 list_all=0 jump_seed=""
-  local positional=()
+  local delete_mode=""
+  local -a merge_passthrough=()
+  local -a positional=()
 
   while [[ $# -gt 0 ]]; do
+    # Short-flag cluster expansion: leading -, second char not -, length >= 3
+    if [[ "$1" =~ ^-[^-].+ ]]; then
+      local cluster_out
+      cluster_out=$(_git_fork_parse_cluster "$1") || return 1
+      local -a expanded
+      mapfile -t expanded <<< "$cluster_out"
+      shift
+      set -- "${expanded[@]}" "$@"
+      continue
+    fi
+
     case "$1" in
-      --help)
+      --help|-h)
         echo 'usage: git fork [--list [-a|--all]] [--jump|-j <seed>] [commitish]'
+        echo '       git fork -d|--delete'
+        echo '       git fork -D|--delete-unmerged'
+        echo '       git fork --delete-and-skip-checks'
+        echo '       git fork -m|--merge [merge-args…]'
         echo
         echo "Creates a new detached worktree under ${GIT_WORKTREE_BASE:-$HOME/Development/.worktrees}, pointing to commitish or HEAD if unspecified"
         echo
         echo 'Options:'
-        echo '  --list, -l        List worktrees for the current repository'
-        echo '  --all, -a         With --list: list worktrees for all repositories'
-        echo '  --jump, -j <seed> cd to the worktree identified by seed (first column of --list)'
+        echo '  --list, -l              List worktrees for the current repository'
+        echo '  --all, -a               With --list: list worktrees for all repositories'
+        echo '  --jump, -j <seed>       cd to the worktree identified by seed (first column of --list)'
+        echo '  -d, --delete            Remove this worktree (fails if dirty or unmerged)'
+        echo '  -D, --delete-unmerged   Remove this worktree (fails if dirty; skips merged check)'
+        echo '  --delete-and-skip-checks  Force-remove worktree (skips all safety checks)'
+        echo '  -m, --merge [args…]     Merge fork into main then remove worktree; passes remaining args to git merge'
+        echo
+        echo 'Short-flag cluster rule: value-taking flags (-j) must be last in a cluster.'
+        echo '  Valid: -la, -lj <seed>   Invalid: -jl <seed>'
+        echo
+        echo 'Delete/merge flags are mutually exclusive with -l/-a/-j and with each other.'
+        echo 'Dirty-check failures name --delete-and-skip-checks as the escape hatch.'
+        return 0
+        ;;
+      --list|-l)   list=1 ;;
+      --all|-a)    list_all=1 ;;
+      --jump|-j)   shift; jump_seed="$1" ;;
+      --delete|-d)
+        if [[ -n "$delete_mode" ]]; then
+          echo "git fork: conflicting delete/merge flags" >&2
+          return 1
+        fi
+        delete_mode="d"
+        ;;
+      --delete-unmerged|-D)
+        if [[ -n "$delete_mode" ]]; then
+          echo "git fork: conflicting delete/merge flags" >&2
+          return 1
+        fi
+        delete_mode="D"
+        ;;
+      --delete-and-skip-checks)
+        if [[ -n "$delete_mode" ]]; then
+          echo "git fork: conflicting delete/merge flags" >&2
+          return 1
+        fi
+        delete_mode="skip"
+        ;;
+      --merge|-m)
+        if [[ -n "$delete_mode" ]]; then
+          echo "git fork: conflicting delete/merge flags" >&2
+          return 1
+        fi
+        delete_mode="m"
+        shift
+        while [[ $# -gt 0 ]]; do
+          merge_passthrough+=("$1")
+          shift
+        done
+        continue
+        ;;
+      --)
+        shift
+        while [[ $# -gt 0 ]]; do
+          positional+=("$1")
+          shift
+        done
+        continue
+        ;;
+      -*)
+        echo "git fork: unknown flag: $1" >&2
         return 1
         ;;
-      --list|-l) list=1 ;;
-      --all|-a)  list_all=1 ;;
-      --jump|-j) shift; jump_seed="$1" ;;
-      *)         positional+=("$1") ;;
+      *)           positional+=("$1") ;;
     esac
     shift
   done
 
   [[ $list_all -eq 1 ]] && list=1
+
+  if [[ -n "$delete_mode" ]]; then
+    if [[ $list -eq 1 || $list_all -eq 1 || -n "$jump_seed" || ${#positional[@]} -gt 0 ]]; then
+      echo "git fork: delete/merge flags cannot be combined with --list, --all, --jump, or positional args" >&2
+      return 1
+    fi
+
+    local worktree_root main_root fork_sha
+
+    worktree_root=$(_git_fork_worktree_root) || {
+      echo "git fork: not inside a fork worktree" >&2
+      return 1
+    }
+    main_root=$(_git_fork_main_repo_root) || {
+      echo "git fork: could not locate main repo root" >&2
+      return 1
+    }
+
+    if [[ "$delete_mode" != "skip" ]]; then
+      if _git_fork_is_dirty "$worktree_root"; then
+        echo "git fork: uncommitted changes in worktree; commit/stash first, or pass --delete-and-skip-checks to force" >&2
+        return 1
+      fi
+    fi
+
+    case "$delete_mode" in
+      d)
+        fork_sha=$(command git rev-parse HEAD 2>/dev/null) || {
+          echo "git fork: cannot resolve fork HEAD" >&2
+          return 1
+        }
+        if ! _git_fork_is_merged "$fork_sha" "$main_root"; then
+          echo "git fork: fork HEAD $fork_sha not merged into main; use -D (--delete-unmerged) to override" >&2
+          return 1
+        fi
+        cd "$main_root" || { echo "git fork: cannot cd to main repo root" >&2; return 1; }
+        command git worktree remove "$worktree_root"
+        ;;
+      D)
+        cd "$main_root" || { echo "git fork: cannot cd to main repo root" >&2; return 1; }
+        command git worktree remove "$worktree_root"
+        ;;
+      skip)
+        cd "$main_root" || { echo "git fork: cannot cd to main repo root" >&2; return 1; }
+        command git worktree remove -f "$worktree_root"
+        ;;
+      m)
+        fork_sha=$(command git rev-parse HEAD 2>/dev/null) || {
+          echo "git fork: cannot resolve fork HEAD" >&2
+          return 1
+        }
+        cd "$main_root" || { echo "git fork: cannot cd to main repo root" >&2; return 1; }
+        if ! command git merge "${merge_passthrough[@]}" "$fork_sha"; then
+          echo "git fork -m: merge failed; worktree left intact" >&2
+          return 1
+        fi
+        command git worktree remove "$worktree_root"
+        ;;
+    esac
+    return
+  fi
 
   if [[ -n "$jump_seed" ]]; then
     local base_dir="${GIT_WORKTREE_BASE:-$HOME/Development/.worktrees}"
@@ -197,7 +388,7 @@ git-fork() {
       echo "git fork --jump: worktree not found: $jump_seed" >&2
       return 1
     fi
-    cd "$jump_dir"
+    cd "$jump_dir" || { echo "git fork --jump: cannot cd to $jump_dir" >&2; return 1; }
     return 0
   fi
 
@@ -228,40 +419,11 @@ git-fork() {
   (command git submodule init && command git submodule update) || :
 }
 
-git-unfork() {
-  if [[ "$1" == --help ]]; then
-    echo 'usage: git unfork [--merge]'
-    echo
-    echo 'Run from a forked worktree. Returns to the base directory and removes the worktree. Merges if --merge is specified'
-    return 1
-  fi
-
-  local fork_base="$(command git rev-parse --show-toplevel)"
-  local sha=$(command git rev-parse HEAD)
-
-  if [[ -f "$fork_base/.git" ]]; then
-    cd "$(command git rev-parse --git-common-dir)/.."
-
-    command git worktree remove -f "$fork_base"
-
-    if [[ "$1" == --merge ]]; then
-      shift
-      command git merge "$@" "$sha"
-    fi
-  else
-    echo "Not in worktree"
-    return 1
-  fi
-}
-
 # we're doing this just so I can add git commands myself
 __git__() {
   if [[ "$1" == fork ]]; then
     shift
     git-fork "$@"
-  elif [[ "$1" == unfork ]]; then
-    shift
-    git-unfork "$@"
   else
     if [[ $# -gt 0 ]]; then
       $(which git) "$@"

@@ -1,9 +1,15 @@
 bats_require_minimum_version 1.5.0
 load 'helpers'
 
-@test "--help exits 1" {
+@test "--help exits 0 and prints usage" {
   run git-fork --help
-  [ "$status" -eq 1 ]
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"usage: git fork"* ]]
+}
+
+@test "-h is equivalent to --help" {
+  run git-fork -h
+  [ "$status" -eq 0 ]
   [[ "$output" == *"usage: git fork"* ]]
 }
 
@@ -96,4 +102,95 @@ load 'helpers'
   run git-fork
   [ "$status" -eq 1 ]
   [[ "$output" == *"unborn"* ]]
+}
+
+# -m tests (ported from unfork.bats)
+
+@test "-m fast-forwards main to fork HEAD, worktree removed, cwd = main root" {
+  make_repo myrepo
+  make_fork myrepo seedA
+  cd "$GIT_WORKTREE_BASE/myrepo/seedA"
+  command git config user.email "test@example.com"
+  command git config user.name "Test User"
+  command git commit --allow-empty -q -m "fork commit"
+  local fork_sha
+  fork_sha=$(command git rev-parse HEAD)
+  git-fork -m
+  local main_sha
+  main_sha=$(command git -C "$REAL_TMPDIR/src/myrepo" rev-parse HEAD)
+  [ "$main_sha" = "$fork_sha" ]
+  [ ! -d "$GIT_WORKTREE_BASE/myrepo/seedA" ]
+  [ "$PWD" = "$REAL_TMPDIR/src/myrepo" ]
+}
+
+@test "-m --no-ff creates a merge commit; fork sha reachable from new main HEAD; worktree removed" {
+  make_repo myrepo
+  make_fork myrepo seedA
+  cd "$GIT_WORKTREE_BASE/myrepo/seedA"
+  command git config user.email "test@example.com"
+  command git config user.name "Test User"
+  command git commit --allow-empty -q -m "fork commit"
+  local fork_sha
+  fork_sha=$(command git rev-parse HEAD)
+  git-fork -m --no-ff
+  local merge_sha
+  merge_sha=$(command git -C "$REAL_TMPDIR/src/myrepo" rev-parse HEAD)
+  [ "$merge_sha" != "$fork_sha" ]
+  command git -C "$REAL_TMPDIR/src/myrepo" merge-base --is-ancestor "$fork_sha" HEAD
+  [ ! -d "$GIT_WORKTREE_BASE/myrepo/seedA" ]
+}
+
+@test "-m rejects dirty worktree; status 1, worktree intact, main HEAD unchanged" {
+  make_repo myrepo
+  local main_sha_before
+  main_sha_before=$(command git -C "$REAL_TMPDIR/src/myrepo" rev-parse HEAD)
+  make_fork myrepo seedA
+  cd "$GIT_WORKTREE_BASE/myrepo/seedA"
+  echo "dirty" > untracked.txt
+  run --separate-stderr git-fork -m
+  [ "$status" -eq 1 ]
+  [ -d "$GIT_WORKTREE_BASE/myrepo/seedA" ]
+  local main_sha_after
+  main_sha_after=$(command git -C "$REAL_TMPDIR/src/myrepo" rev-parse HEAD)
+  [ "$main_sha_after" = "$main_sha_before" ]
+}
+
+@test "-m on merge conflict: exits non-zero, worktree intact, MERGE_HEAD exists in main" {
+  make_repo myrepo
+  local main_root="$REAL_TMPDIR/src/myrepo"
+  # Fork created at initial commit; then both branches add conflicting content
+  make_fork myrepo seedA
+  command git -C "$main_root" config user.email "test@example.com"
+  command git -C "$main_root" config user.name "Test User"
+  echo "main line" > "$main_root/conflict.txt"
+  command git -C "$main_root" add conflict.txt
+  command git -C "$main_root" commit -q -m "main: add conflict.txt"
+  cd "$GIT_WORKTREE_BASE/myrepo/seedA"
+  command git config user.email "test@example.com"
+  command git config user.name "Test User"
+  echo "fork line" > conflict.txt
+  command git add conflict.txt
+  command git commit -q -m "fork: add conflicting conflict.txt"
+  run --separate-stderr git-fork -m
+  [ "$status" -ne 0 ]
+  [ -d "$GIT_WORKTREE_BASE/myrepo/seedA" ]
+  [ -f "$main_root/.git/MERGE_HEAD" ]
+}
+
+@test "-m outside a worktree exits 1 with not-in-fork message" {
+  make_repo myrepo
+  cd "$REAL_TMPDIR/src/myrepo"
+  run --separate-stderr git-fork -m
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"not inside a fork worktree"* ]]
+}
+
+@test "--help output mentions -d, -D, --delete-unmerged, --delete-and-skip-checks, and -m" {
+  run git-fork --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-d"* ]]
+  [[ "$output" == *"-D"* ]]
+  [[ "$output" == *"--delete-unmerged"* ]]
+  [[ "$output" == *"--delete-and-skip-checks"* ]]
+  [[ "$output" == *"-m"* ]]
 }
