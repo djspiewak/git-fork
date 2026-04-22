@@ -100,7 +100,7 @@ git-fork-list() {
     fi
 
     local first=1
-    local -A seen
+    local -a _seen_keys=()
     for scan_dir in "${scan_dirs[@]}"; do
       while IFS= read -r cand; do
         local git_file main_repo=""
@@ -118,12 +118,16 @@ git-fork-list() {
           dedup_key=$(cd "$cand" && pwd -P 2>/dev/null) || dedup_key="$cand"
         fi
 
-        if [[ -n "${seen[$dedup_key]+x}" ]]; then
+        local _found=0 _sk
+        for _sk in "${_seen_keys[@]}"; do
+          [[ "$_sk" == "$dedup_key" ]] && { _found=1; break; }
+        done
+        if [[ $_found -eq 1 ]]; then
           [[ -n "$main_repo" ]] && command git -C "$main_repo" worktree list --porcelain 2>/dev/null \
             | git-fork-show-worktrees "$cand"
           continue
         fi
-        seen["$dedup_key"]=1
+        _seen_keys+=("$dedup_key")
 
         local repo_name="${cand##*/}"
         [[ $first -eq 0 ]] && echo
@@ -233,8 +237,8 @@ git-fork() {
     if [[ "$1" =~ ^-[^-].+ ]]; then
       local cluster_out
       cluster_out=$(_git_fork_parse_cluster "$1") || return 1
-      local -a expanded
-      mapfile -t expanded <<< "$cluster_out"
+      local -a expanded=()
+      while IFS= read -r _flag; do expanded+=("$_flag"); done <<< "$cluster_out"
       shift
       set -- "${expanded[@]}" "$@"
       continue
