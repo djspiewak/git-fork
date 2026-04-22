@@ -28,7 +28,7 @@ load 'helpers'
   make_repo myrepo
   cd "$REAL_TMPDIR/src/myrepo"
   run __git__ unfork
-  [ "$status" -eq 255 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"Not in worktree"* ]]
 }
 

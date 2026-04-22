@@ -46,8 +46,6 @@ Looks first in the current repo's directory; falls back to a `find` across all r
 
 **Alias override.** Sourcing this file sets `alias git="__git__"`. This overrides any pre-existing `git` alias (e.g. from `hub` or `gh`). If you rely on another git wrapper, source this file first and alias-chain as needed.
 
-**Exit codes.** `git fork --help` and `git unfork` (when not in a worktree) return exit code 255. This is because bash translates `return -1` to 255 (unsigned 8-bit wrap).
-
 ## Running tests
 
 ```bash

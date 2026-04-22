@@ -43,7 +43,7 @@ load 'helpers'
   [[ "$output" == *"seedX"* ]]
 }
 
-@test "all mode dual-scan: GIT_WORKTREE_BASE differs from default, both scanned without dedup" {
+@test "all mode dual-scan dedups same repo appearing under both bases" {
   make_repo myrepo
   make_fork myrepo seedA
   local default_base="$HOME/Development/.worktrees"
@@ -52,10 +52,13 @@ load 'helpers'
     "$default_base/myrepo/seedB"
   run git-fork-list 1
   [ "$status" -eq 0 ]
-  # repo name should appear twice (once per scan dir) — no dedup
+  # repo name should appear exactly once (deduped by main-repo path)
   local count
   count=$(echo "$output" | grep -c "^myrepo$")
-  [ "$count" -eq 2 ]
+  [ "$count" -eq 1 ]
+  # both seeds should be visible under the single header
+  [[ "$output" == *"seedA"* ]]
+  [[ "$output" == *"seedB"* ]]
 }
 
 @test "all mode skips empty seed subdirs" {

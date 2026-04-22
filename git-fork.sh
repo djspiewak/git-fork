@@ -90,20 +90,35 @@ git-fork-list() {
     fi
 
     local first=1
+    local -A seen
     for scan_dir in "${scan_dirs[@]}"; do
       while IFS= read -r cand; do
-        local repo_name="${cand##*/}"
-        [[ $first -eq 0 ]] && echo
-        first=0
-        echo "$repo_name"
-
         local git_file main_repo=""
         git_file=$(command find "$cand" -maxdepth 2 -type f -name ".git" -print -quit 2>/dev/null)
         if [[ -n "$git_file" ]]; then
           local common_dir
-          common_dir=$(command git -C "${git_file%/.git}" rev-parse --git-common-dir 2>/dev/null)
+          common_dir=$(command git -C "${git_file%/.git}" rev-parse --git-common-dir 2>/dev/null) || true
           [[ "$common_dir" == /* ]] && main_repo="${common_dir%/*}"
         fi
+
+        local dedup_key
+        if [[ -n "$main_repo" ]]; then
+          dedup_key="$main_repo"
+        else
+          dedup_key=$(cd "$cand" && pwd -P 2>/dev/null) || dedup_key="$cand"
+        fi
+
+        if [[ -n "${seen[$dedup_key]+x}" ]]; then
+          [[ -n "$main_repo" ]] && command git -C "$main_repo" worktree list --porcelain 2>/dev/null \
+            | git-fork-show-worktrees "$cand"
+          continue
+        fi
+        seen["$dedup_key"]=1
+
+        local repo_name="${cand##*/}"
+        [[ $first -eq 0 ]] && echo
+        first=0
+        echo "$repo_name"
 
         if [[ -n "$main_repo" ]]; then
           command git -C "$main_repo" worktree list --porcelain 2>/dev/null \
@@ -134,7 +149,7 @@ git-fork() {
         echo '  --list, -l        List worktrees for the current repository'
         echo '  --all, -a         With --list: list worktrees for all repositories'
         echo '  --jump, -j <seed> cd to the worktree identified by seed (first column of --list)'
-        return -1
+        return 1
         ;;
       --list|-l) list=1 ;;
       --all|-a)  list_all=1 ;;
@@ -195,19 +210,22 @@ git-fork() {
   if [[ ${#positional[@]} -gt 0 ]]; then
     sha="${positional[0]}"
   else
-    sha=$(git rev-parse HEAD)
+    sha=$(command git rev-parse --verify HEAD 2>/dev/null) || {
+      echo "git fork: cannot fork an unborn repository (no commits yet)" >&2
+      return 1
+    }
   fi
 
-  cd "$(git rev-parse --git-common-dir)/.."
+  cd "$(command git rev-parse --git-common-dir)/.."
 
   local base="$(basename "$PWD")"
   local seed=$(LC_ALL=C tr -dc 'a-zA-Z' < /dev/urandom | head -c 6; echo)
   local dir="${GIT_WORKTREE_BASE:-$HOME/Development/.worktrees}/$base/$seed"
   mkdir -p "$dir"
 
-  git worktree add --detach "$dir" $sha
+  command git worktree add --detach "$dir" "$sha"
   cd "$dir"
-  (git submodule init && git submodule update) || :
+  (command git submodule init && command git submodule update) || :
 }
 
 git-unfork() {
@@ -215,24 +233,24 @@ git-unfork() {
     echo 'usage: git unfork [--merge]'
     echo
     echo 'Run from a forked worktree. Returns to the base directory and removes the worktree. Merges if --merge is specified'
-    return -1
+    return 1
   fi
 
-  local fork_base="$(git rev-parse --show-toplevel)"
-  local sha=$(git rev-parse HEAD)
+  local fork_base="$(command git rev-parse --show-toplevel)"
+  local sha=$(command git rev-parse HEAD)
 
   if [[ -f "$fork_base/.git" ]]; then
-    cd "$(git rev-parse --git-common-dir)/.."
+    cd "$(command git rev-parse --git-common-dir)/.."
 
-    git worktree remove -f "$fork_base"
+    command git worktree remove -f "$fork_base"
 
     if [[ "$1" == --merge ]]; then
       shift
-      git merge $* $sha
+      command git merge "$@" "$sha"
     fi
   else
     echo "Not in worktree"
-    return -1
+    return 1
   fi
 }
 

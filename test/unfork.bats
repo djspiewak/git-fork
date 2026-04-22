@@ -1,16 +1,16 @@
 load 'helpers'
 
-@test "--help exits 255" {
+@test "--help exits 1" {
   run git-unfork --help
-  [ "$status" -eq 255 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"usage: git unfork"* ]]
 }
 
-@test "not in a worktree prints error and exits 255" {
+@test "not in a worktree prints error and exits 1" {
   make_repo myrepo
   cd "$REAL_TMPDIR/src/myrepo"
   run git-unfork
-  [ "$status" -eq 255 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"Not in worktree"* ]]
 }
 

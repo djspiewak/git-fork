@@ -1,9 +1,9 @@
 bats_require_minimum_version 1.5.0
 load 'helpers'
 
-@test "--help exits 255" {
+@test "--help exits 1" {
   run git-fork --help
-  [ "$status" -eq 255 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"usage: git fork"* ]]
 }
 
@@ -88,4 +88,12 @@ load 'helpers'
   cd "$REAL_TMPDIR/src/badmod"
   run git-fork
   [ "$status" -eq 0 ]
+}
+
+@test "default fork on unborn repo fails with clear error" {
+  command git init "$REAL_TMPDIR/src/unborn"
+  cd "$REAL_TMPDIR/src/unborn"
+  run git-fork
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unborn"* ]]
 }
