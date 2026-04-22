@@ -6,6 +6,10 @@ setup() {
   export GIT_WORKTREE_BASE="$REAL_TMPDIR/.worktrees"
   export HOME="$REAL_TMPDIR/home"
   mkdir -p "$GIT_WORKTREE_BASE" "$HOME/.worktrees"
+  # Prevent git from prompting for credentials or reading system-level helpers
+  # (osxkeychain on macOS CI can hang indefinitely waiting for user input).
+  export GIT_TERMINAL_PROMPT=0
+  export GIT_CONFIG_NOSYSTEM=1
   # shellcheck disable=SC1090
   source "$BATS_TEST_DIRNAME/../git-fork.sh"
 }
