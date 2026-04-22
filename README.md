@@ -4,7 +4,22 @@ Bash functions that add `git fork` as a first-class git subcommand, plus a dispa
 
 ## Install
 
-Add one line to `~/.profile` (or `~/.bashrc`):
+### Homebrew (recommended)
+
+```bash
+brew tap djspiewak/tap
+brew install git-fork
+```
+
+Then add one line to `~/.bashrc` (bash only — zsh is not supported because the script relies on `printf -v`):
+
+```bash
+source "$(brew --prefix git-fork)/share/git-fork/git-fork.sh"
+```
+
+### Manual
+
+Clone the repo and add one line to `~/.bashrc`:
 
 ```bash
 source ~/Development/git-fork/git-fork.sh
