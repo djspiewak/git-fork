@@ -62,6 +62,56 @@ Merges the fork's HEAD into the main branch then removes the worktree. Additiona
 
 Refuses to run if the worktree is dirty; commit or stash your changes first.
 
+### Hooks
+
+`git fork` looks for executable scripts in `.git/hooks/` and runs them at key points in the lifecycle. If a hook exits non-zero the operation continues and a warning is printed to stderr.
+
+| Hook | When | cwd |
+|---|---|---|
+| `fork-post-create` | after `git worktree add` and built-in submodule init | new worktree |
+| `fork-pre-delete` | after safety checks pass, before `git worktree remove` (`-d` and `-D` only) | fork worktree |
+| `fork-post-merge` | after a successful `git merge`, before `git worktree remove` | main repo root |
+
+`--delete-and-skip-checks` skips `fork-pre-delete` by design — it is the nuclear option.
+
+Note: `fork-pre-delete` fires before the removal is attempted; if `git worktree remove` subsequently fails, the hook has already run.
+
+#### Environment variables
+
+Every hook receives:
+
+| Variable | Value |
+|---|---|
+| `GIT_FORK_WORKTREE` | absolute path of the fork worktree |
+| `GIT_FORK_MAIN` | absolute path of the main repo root |
+| `GIT_FORK_SEED` | the 6-char seed (basename of the worktree) |
+| `GIT_FORK_SHA` | HEAD SHA at the moment of the hook (for `fork-post-merge`: the fork's pre-merge HEAD, i.e. the SHA merged in) |
+
+#### `core.hooksPath`
+
+`git fork` resolves hook paths with `git rev-parse --git-path`, so `core.hooksPath` is respected automatically. Repos that want versioned hooks can set:
+
+```bash
+git config core.hooksPath .hooks
+```
+
+and check the scripts into the tree. In a linked worktree the hook resolves through the common dir, so the file lives once in the main repo.
+
+#### Example
+
+```bash
+cat > .git/hooks/fork-post-create << 'EOF'
+#!/usr/bin/env bash
+npm install
+cp .env.example .env
+EOF
+chmod +x .git/hooks/fork-post-create
+```
+
+#### Built-in submodule init
+
+`git fork` always runs `git submodule init && git submodule update` immediately before `fork-post-create`. A failure is tolerated (same `|| :` semantics as before). The hook can rely on submodule directories already being present.
+
 ### Short-flag cluster rule
 
 A cluster is a single token starting with `-` where the second character is not `-` and the token is at least 3 characters long (e.g. `-la`). Value-taking flags (`-j`) must appear last in a cluster; `-jl` is a parse error.

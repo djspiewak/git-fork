@@ -201,6 +201,27 @@ _git_fork_is_merged() {
   command git -C "$main_repo_root" merge-base --is-ancestor "$fork_sha" HEAD 2>/dev/null
 }
 
+# _git_fork_run_hook <phase> <worktree> <main_root> <seed> <sha>
+# Looks up hooks/fork-<phase> (honoring core.hooksPath), executes it
+# with GIT_FORK_* env vars. Warns on non-zero exit. Always returns 0.
+_git_fork_run_hook() {
+  local phase="$1" worktree="$2" main_root="$3" seed="$4" sha="$5"
+  local hook_path
+  hook_path=$(command git -C "$main_root" rev-parse --git-path "hooks/fork-$phase" 2>/dev/null) || return 0
+  [[ "$hook_path" != /* ]] && hook_path="$main_root/$hook_path"
+  [[ -x "$hook_path" ]] || return 0
+  local rc=0
+  GIT_FORK_WORKTREE="$worktree" \
+  GIT_FORK_MAIN="$main_root" \
+  GIT_FORK_SEED="$seed" \
+  GIT_FORK_SHA="$sha" \
+    "$hook_path" || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "git fork: hook 'fork-$phase' exited $rc (continuing)" >&2
+  fi
+  return 0
+}
+
 git-fork() {
   local list=0 list_all=0 jump_seed=""
   local delete_mode=""
@@ -307,7 +328,7 @@ git-fork() {
       return 1
     fi
 
-    local worktree_root main_root fork_sha
+    local worktree_root main_root fork_sha seed
 
     worktree_root=$(_git_fork_worktree_root) || {
       echo "git fork: not inside a fork worktree" >&2
@@ -317,6 +338,7 @@ git-fork() {
       echo "git fork: could not locate main repo root" >&2
       return 1
     }
+    seed="${worktree_root##*/}"
 
     if [[ "$delete_mode" != "skip" ]]; then
       if _git_fork_is_dirty "$worktree_root"; then
@@ -335,10 +357,18 @@ git-fork() {
           echo "git fork: fork HEAD $fork_sha not merged into main; use -D (--delete-unmerged) to override" >&2
           return 1
         fi
+        cd "$worktree_root" || { echo "git fork: cannot cd to fork worktree" >&2; return 1; }
+        _git_fork_run_hook pre-delete "$worktree_root" "$main_root" "$seed" "$fork_sha"
         cd "$main_root" || { echo "git fork: cannot cd to main repo root" >&2; return 1; }
         command git worktree remove "$worktree_root"
         ;;
       D)
+        fork_sha=$(command git rev-parse HEAD 2>/dev/null) || {
+          echo "git fork: cannot resolve fork HEAD" >&2
+          return 1
+        }
+        cd "$worktree_root" || { echo "git fork: cannot cd to fork worktree" >&2; return 1; }
+        _git_fork_run_hook pre-delete "$worktree_root" "$main_root" "$seed" "$fork_sha"
         cd "$main_root" || { echo "git fork: cannot cd to main repo root" >&2; return 1; }
         command git worktree remove "$worktree_root"
         ;;
@@ -356,6 +386,7 @@ git-fork() {
           echo "git fork -m: merge failed; worktree left intact" >&2
           return 1
         fi
+        _git_fork_run_hook post-merge "$worktree_root" "$main_root" "$seed" "$fork_sha"
         command git worktree remove "$worktree_root"
         ;;
     esac
@@ -417,16 +448,26 @@ git-fork() {
     }
   fi
 
-  cd "$(command git rev-parse --git-common-dir)/.."
+  local main_root
+  main_root=$(_git_fork_main_repo_root) || {
+    echo "git fork: could not locate main repo root" >&2
+    return 1
+  }
+  cd "$main_root" || { echo "git fork: cannot cd to main repo root" >&2; return 1; }
 
-  local base="$(basename "$PWD")"
-  local seed=$(LC_ALL=C tr -dc 'a-zA-Z' < /dev/urandom | head -c 6; echo)
+  local base
+  base=$(basename "$main_root")
+  local seed
+  seed=$(LC_ALL=C tr -dc 'a-zA-Z' < /dev/urandom | head -c 6; echo)
   local dir="${GIT_WORKTREE_BASE:-$HOME/.worktrees}/$base/$seed"
   mkdir -p "$dir"
 
-  command git worktree add --detach "$dir" "$sha"
-  cd "$dir"
+  command git worktree add --detach "$dir" "$sha" || { rmdir "$dir" "${dir%/*}" 2>/dev/null; return 1; }
+  cd "$dir" || { echo "git fork: cannot cd to new worktree" >&2; return 1; }
+  local fork_sha
+  fork_sha=$(command git rev-parse HEAD 2>/dev/null) || fork_sha=""
   (command git submodule init && command git submodule update) || :
+  _git_fork_run_hook post-create "$dir" "$main_root" "$seed" "$fork_sha"
 }
 
 # we're doing this just so I can add git commands myself
